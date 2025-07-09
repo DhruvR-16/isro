@@ -5,6 +5,8 @@ const socketIo = require('socket.io');
 const cron = require('node-cron');
 const axios = require('axios');
 require('dotenv').config();
+const { spawn } = require('child_process');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -19,14 +21,14 @@ app.use(cors());
 app.use(express.json());
 
 // In-memory storage for demo (use database in production)
-let aqiData = new Map();
-let historicalData = new Map();
-let alerts = [];
+let aqiData = new Map(); // Stores current AQI for each city
+let historicalData = new Map(); // Stores historical data for each city
+let alerts = []; // Stores recent alerts
 
-// Google Maps API Key
+// Google Maps API Key (used by frontend and now backend for geocoding)
 const GOOGLE_MAPS_API_KEY = 'AIzaSyAoKk7dHcJoF7H2tRb_dREOO_dSByRDgzw';
 
-// Major Indian cities with coordinates
+// Comprehensive list of Major Indian cities with coordinates
 const INDIAN_CITIES = {
   'delhi': { lat: 28.7041, lng: 77.1025, name: 'Delhi' },
   'mumbai': { lat: 19.0760, lng: 72.8777, name: 'Mumbai' },
@@ -47,246 +49,256 @@ const INDIAN_CITIES = {
   'patna': { lat: 25.5941, lng: 85.1376, name: 'Patna' },
   'agra': { lat: 27.1767, lng: 78.0081, name: 'Agra' },
   'nashik': { lat: 19.9975, lng: 73.7898, name: 'Nashik' },
-  'faridabad': { lat: 28.4089, lng: 77.3178, name: 'Faridabad' }
+  'faridabad': { lat: 28.4089, lng: 77.3178, name: 'Faridabad' },
+  'ghaziabad': { lat: 28.6692, lng: 77.4538, name: 'Ghaziabad' },
+  'ludhiana': { lat: 30.9010, lng: 75.8573, name: 'Ludhiana' },
+  'amritsar': { lat: 31.6340, lng: 74.8723, name: 'Amritsar' },
+  'chandigarh': { lat: 30.7333, lng: 76.7794, name: 'Chandigarh' },
+  'kochi': { lat: 9.9312, lng: 76.2673, name: 'Kochi' },
+  'thiruvananthapuram': { lat: 8.5241, lng: 76.9366, name: 'Thiruvananthapuram' },
+  'visakhapatnam': { lat: 17.6868, lng: 83.2185, name: 'Visakhapatnam' },
+  'bhubaneswar': { lat: 20.2961, lng: 85.8245, name: 'Bhubaneswar' },
+  'guwahati': { lat: 26.1445, lng: 91.7362, name: 'Guwahati' },
+  'mysuru': { lat: 12.2958, lng: 76.6394, name: 'Mysuru' },
+  'coimbatore': { lat: 11.0168, lng: 76.9558, name: 'Coimbatore' },
+  'madurai': { lat: 9.9252, lng: 78.1198, name: 'Madurai' },
+  'bhopal': { lat: 23.2599, lng: 77.4126, name: 'Bhopal' },
+  'ranchi': { lat: 23.3441, lng: 85.3096, name: 'Ranchi' },
+  'jamshedpur': { lat: 22.8045, lng: 86.2029, name: 'Jamshedpur' },
+  'dhanbad': { lat: 23.7957, lng: 86.4304, name: 'Dhanbad' },
+  'srinagar': { lat: 34.0837, lng: 74.7973, name: 'Srinagar' },
+  'shimla': { lat: 31.1048, lng: 77.1734, name: 'Shimla' }
 };
 
-// Generate realistic AQI data based on city characteristics
-function generateAQIData(cityKey, cityData) {
-  const cityHash = cityKey.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const timeOfDay = new Date().getHours();
-  const dayOfWeek = new Date().getDay();
-  
-  // Base AQI with city-specific factors
-  let baseAQI = 50 + (cityHash % 100);
-  
-  // Time-based variations (higher during rush hours)
-  if (timeOfDay >= 7 && timeOfDay <= 10) baseAQI += 20; // Morning rush
-  if (timeOfDay >= 17 && timeOfDay <= 20) baseAQI += 25; // Evening rush
-  if (timeOfDay >= 0 && timeOfDay <= 5) baseAQI -= 15; // Night time
-  
-  // Weekend effect (slightly better air quality)
-  if (dayOfWeek === 0 || dayOfWeek === 6) baseAQI -= 10;
-  
-  // Seasonal variations (winter months have higher pollution)
-  const month = new Date().getMonth();
-  if (month >= 10 || month <= 2) baseAQI += 30; // Nov-Feb
-  
-  // Add some randomness
-  baseAQI += Math.random() * 40 - 20;
-  baseAQI = Math.max(0, Math.min(500, Math.floor(baseAQI)));
-  
-  const pm25 = Math.floor(baseAQI * 0.6 + Math.random() * 20);
-  const pm10 = Math.floor(baseAQI * 0.8 + Math.random() * 30);
-  const no2 = Math.floor(baseAQI * 0.4 + Math.random() * 15);
-  const so2 = Math.floor(baseAQI * 0.3 + Math.random() * 10);
-  const o3 = Math.floor(baseAQI * 0.5 + Math.random() * 25);
-  const co = Math.floor(baseAQI * 0.2 + Math.random() * 5);
-  
+// Function to generate simulated AQI data for ANY location
+const generateSimulatedAQI = (name, lat, lng, latestAQI = null) => {
+  let aqi;
+  if (latestAQI !== null) {
+    // Simulate slight variations around the latest known AQI
+    aqi = Math.max(20, latestAQI + Math.floor(Math.random() * 40) - 20);
+  } else {
+    // Generate a random AQI for initial load or new city
+    aqi = Math.floor(Math.random() * 200) + 50; // Between 50 and 250
+  }
+
+  const getAQICategory = (aqiValue) => {
+    if (aqiValue <= 50) return { category: 'Good', color: 'bg-green-500', level: 1 };
+    if (aqiValue <= 100) return { category: 'Moderate', color: 'bg-yellow-500', level: 2 };
+    if (aqiValue <= 150) return { category: 'Unhealthy for Sensitive Groups', color: 'bg-orange-500', level: 3 };
+    if (aqiValue <= 200) return { category: 'Unhealthy', color: 'bg-red-500', level: 4 };
+    if (aqiValue <= 300) return { category: 'Very Unhealthy', color: 'bg-purple-500', level: 5 };
+    return { category: 'Hazardous', color: 'bg-red-900', level: 6 };
+  };
+
+  const category = getAQICategory(aqi);
+
+  // Simulate other pollutants based on AQI
+  const pm25 = Math.max(10, Math.min(250, Math.floor(aqi * 0.6 + Math.random() * 30 - 15)));
+  const pm10 = Math.max(20, Math.min(400, Math.floor(aqi * 0.8 + Math.random() * 40 - 20)));
+  const no2 = Math.max(5, Math.min(80, Math.floor(aqi * 0.2 + Math.random() * 10 - 5)));
+  const so2 = Math.max(2, Math.min(50, Math.floor(aqi * 0.1 + Math.random() * 5 - 2)));
+  const o3 = Math.max(10, Math.min(120, Math.floor(aqi * 0.3 + Math.random() * 15 - 7)));
+  const co = Math.max(0.5, Math.min(15, parseFloat((aqi * 0.05 + Math.random() * 2 - 1).toFixed(1))));
+
+  // Simulate weather data based on general location (can be improved with real weather API)
+  // For demo, apply some variation based on latitude/season
+  const baseTemp = 25 - Math.abs(lat - 20) * 0.5 + Math.random() * 5 - 2.5; // Colder further from equator
+  const baseHumidity = 60 + Math.random() * 20 - 10;
+  const baseWind = 10 + Math.random() * 8 - 4;
+  const baseVisibility = 7 + Math.random() * 4 - 2;
+
+  const temperature = Math.floor(baseTemp);
+  const humidity = Math.floor(baseHumidity);
+  const windSpeed = Math.floor(baseWind);
+  const visibility = Math.floor(baseVisibility);
+
   return {
-    city: cityData.name,
-    coordinates: { lat: cityData.lat, lng: cityData.lng },
-    aqi: baseAQI,
-    pm25: Math.max(0, pm25),
-    pm10: Math.max(0, pm10),
-    no2: Math.max(0, no2),
-    so2: Math.max(0, so2),
-    o3: Math.max(0, o3),
-    co: Math.max(0, co),
+    city: name,
+    coordinates: { lat, lng },
+    aqi,
+    pm25,
+    pm10,
+    no2,
+    so2,
+    o3,
+    co,
     timestamp: new Date().toISOString(),
-    category: getAQICategory(baseAQI),
-    healthRecommendations: getHealthRecommendations(baseAQI)
+    category,
+    healthRecommendations: ['Simulated recommendation based on AQI'],
+    weather: { temperature, humidity, windSpeed, visibility }
   };
-}
+};
 
-// Generate weather data
-function generateWeatherData(cityKey) {
-  const cityHash = cityKey.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const month = new Date().getMonth();
-  
-  let baseTemp = 25;
-  if (month >= 3 && month <= 5) baseTemp = 35; // Summer
-  if (month >= 6 && month <= 9) baseTemp = 28; // Monsoon
-  if (month >= 10 || month <= 2) baseTemp = 20; // Winter
-  
-  return {
-    temperature: baseTemp + (cityHash % 10) - 5 + Math.random() * 6 - 3,
-    humidity: 50 + (cityHash % 30) + Math.random() * 20 - 10,
-    windSpeed: 5 + Math.random() * 15,
-    windDirection: Math.random() * 360,
-    pressure: 1010 + Math.random() * 20 - 10,
-    visibility: 8 + Math.random() * 7
-  };
-}
-
-// Generate historical data for a city
-function generateHistoricalData(cityKey, days = 30) {
+// Function to generate simulated historical data
+const generateHistoricalData = (name) => {
   const data = [];
   const now = new Date();
-  const cityHash = cityKey.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  
-  for (let i = days - 1; i >= 0; i--) {
+  for (let i = 29; i >= 0; i--) { // Last 30 days
     const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-    const baseAQI = 60 + (cityHash % 80) + Math.sin(i * 0.1) * 20 + Math.random() * 30 - 15;
-    const finalAQI = Math.max(0, Math.min(500, Math.floor(baseAQI)));
-    
+    // Use a simpler AQI generation for historical to show trend
+    const aqi = 50 + Math.floor(Math.sin(i / 5) * 40) + Math.floor(Math.random() * 30);
+    const pm25 = Math.floor(aqi * 0.6);
+    const no2 = Math.floor(aqi * 0.2);
     data.push({
-      date: date.toISOString().split('T')[0],
-      aqi: finalAQI,
-      pm25: Math.floor(finalAQI * 0.6 + Math.random() * 15),
-      pm10: Math.floor(finalAQI * 0.8 + Math.random() * 25),
-      no2: Math.floor(finalAQI * 0.4 + Math.random() * 12),
-      temperature: 25 + Math.sin(i * 0.2) * 8 + Math.random() * 4 - 2,
-      humidity: 60 + Math.sin(i * 0.15) * 20 + Math.random() * 10 - 5,
-      category: getAQICategory(finalAQI)
+      date: date.toISOString().split('T')[0], //YYYY-MM-DD
+      aqi: Math.max(20, aqi),
+      pm25: Math.max(10, pm25),
+      no2: Math.max(5, no2),
+      temperature: 20 + Math.floor(Math.random() * 15),
+      humidity: 50 + Math.floor(Math.random() * 30),
+      windSpeed: 5 + Math.floor(Math.random() * 10),
     });
   }
-  
   return data;
-}
+};
 
-// Generate forecast data
-function generateForecastData(cityKey, currentAQI) {
-  const data = [];
-  const now = new Date();
-  
-  for (let i = 1; i <= 3; i++) {
-    const date = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
-    // Simple trend-based forecast
-    const trend = Math.random() * 20 - 10; // -10 to +10 change
-    const forecastAQI = Math.max(0, Math.min(500, Math.floor(currentAQI + trend)));
-    
-    data.push({
-      date: date.toISOString().split('T')[0],
-      aqi: forecastAQI,
-      pm25: Math.floor(forecastAQI * 0.6),
-      confidence: Math.floor(Math.random() * 20) + 70, // 70-90% confidence
-      category: getAQICategory(forecastAQI)
-    });
+// Function to generate simulated alerts
+const generateAlert = (city, aqi, category) => {
+  const timestamp = new Date().toISOString();
+  let type = 'warning';
+  let message = `AQI in ${city} is elevated to ${aqi} (${category.category}).`;
+
+  if (aqi > 200) {
+    type = 'critical';
+    message = `Critical alert! AQI in ${city} has reached ${aqi} (${category.category}). Take precautions.`;
+  } else if (aqi > 150) {
+    type = 'warning';
+    message = `Warning: AQI in ${city} is ${aqi} (${category.category}). Sensitive groups should be cautious.`;
   }
-  
-  return data;
-}
+  return { id: Date.now() + Math.random(), city, aqi, category: category.category, type, message, timestamp };
+};
 
-function getAQICategory(aqi) {
-  if (aqi <= 50) return { category: 'Good', color: '#00E400', level: 1 };
-  if (aqi <= 100) return { category: 'Moderate', color: '#FFFF00', level: 2 };
-  if (aqi <= 150) return { category: 'Unhealthy for Sensitive Groups', color: '#FF7E00', level: 3 };
-  if (aqi <= 200) return { category: 'Unhealthy', color: '#FF0000', level: 4 };
-  if (aqi <= 300) return { category: 'Very Unhealthy', color: '#8F3F97', level: 5 };
-  return { category: 'Hazardous', color: '#7E0023', level: 6 };
-}
+// Initialize data for all INDIAN_CITIES
+Object.keys(INDIAN_CITIES).forEach(cityKey => {
+  const cityInfo = INDIAN_CITIES[cityKey];
+  const initialAQI = generateSimulatedAQI(cityInfo.name, cityInfo.lat, cityInfo.lng);
+  if (initialAQI) {
+    aqiData.set(cityKey, initialAQI);
+    historicalData.set(cityKey, generateHistoricalData(cityInfo.name));
+    // Generate initial alerts if AQI is high
+    if (initialAQI.aqi > 150) {
+      alerts.unshift(generateAlert(initialAQI.city, initialAQI.aqi, initialAQI.category));
+    }
+  }
+});
 
-function getHealthRecommendations(aqi) {
-  const category = getAQICategory(aqi).category;
-  const recommendations = {
-    'Good': [
-      'Air quality is excellent! Perfect for outdoor activities.',
-      'Great day for jogging, cycling, or spending time outdoors.',
-      'No special precautions needed.'
-    ],
-    'Moderate': [
-      'Air quality is acceptable for most people.',
-      'Unusually sensitive individuals may experience minor symptoms.',
-      'Consider reducing prolonged outdoor exertion.'
-    ],
-    'Unhealthy for Sensitive Groups': [
-      'Members of sensitive groups may experience health effects.',
-      'Consider wearing a mask during outdoor activities.',
-      'Limit prolonged outdoor activities if you have respiratory conditions.'
-    ],
-    'Unhealthy': [
-      'Everyone may experience health effects.',
-      'Wear a mask when going outside.',
-      'Avoid outdoor jogging and strenuous activities.',
-      'Use air purifiers indoors.'
-    ],
-    'Very Unhealthy': [
-      'Health alert: everyone may experience serious health effects.',
-      'Avoid all outdoor activities.',
-      'Keep windows closed and use air purifiers.',
-      'Wear N95 masks if you must go outside.'
-    ],
-    'Hazardous': [
-      'Emergency conditions: everyone is at risk.',
-      'Stay indoors with air purifiers running.',
-      'Avoid all outdoor activities.',
-      'Seek medical attention if experiencing symptoms.'
-    ]
-  };
-  return recommendations[category] || [];
-}
-
-// Initialize data for all cities
-function initializeAllCitiesData() {
-  Object.keys(INDIAN_CITIES).forEach(cityKey => {
-    const cityData = INDIAN_CITIES[cityKey];
-    const aqiInfo = generateAQIData(cityKey, cityData);
-    const weatherInfo = generateWeatherData(cityKey);
-    const historical = generateHistoricalData(cityKey);
-    
-    aqiData.set(cityKey, {
-      ...aqiInfo,
-      weather: weatherInfo
-    });
-    
-    historicalData.set(cityKey, historical);
-  });
-}
-
-// Check for alerts and notify clients
-function checkAlertsAndNotify() {
+// Update AQI data and alerts every minute
+cron.schedule('* * * * *', () => {
+  console.log('Updating AQI data...');
+  const updatedAqiDataArray = [];
   aqiData.forEach((data, cityKey) => {
-    if (data.aqi > 150) { // Unhealthy threshold
-      const alert = {
-        id: Date.now() + Math.random(),
-        city: data.city,
-        aqi: data.aqi,
-        category: data.category.category,
-        message: `High AQI Alert in ${data.city}: ${data.aqi} - ${data.category.category}`,
-        timestamp: new Date().toISOString(),
-        type: data.aqi > 200 ? 'critical' : 'warning'
-      };
-      
-      alerts.unshift(alert);
-      alerts = alerts.slice(0, 50); // Keep only last 50 alerts
-      
-      // Emit to all connected clients
-      io.emit('aqiAlert', alert);
+    const newAqi = generateSimulatedAQI(data.city, data.coordinates.lat, data.coordinates.lng, data.aqi);
+    if (newAqi) {
+      aqiData.set(cityKey, newAqi);
+      updatedAqiDataArray.push(newAqi); // Collect for broadcast
+
+      // Update historical data (add new entry, keep last 30 days)
+      let cityHistorical = historicalData.get(cityKey) || [];
+      cityHistorical.push({
+        date: new Date().toISOString().split('T')[0],
+        aqi: newAqi.aqi,
+        pm25: newAqi.pm25,
+        no2: newAqi.no2,
+        temperature: newAqi.weather.temperature,
+        humidity: newAqi.weather.humidity,
+        windSpeed: newAqi.weather.windSpeed,
+      });
+      if (cityHistorical.length > 30) {
+        cityHistorical = cityHistorical.slice(-30);
+      }
+      historicalData.set(cityKey, cityHistorical);
+
+      // Check for alerts
+      if (newAqi.aqi > 150) {
+        const newAlert = generateAlert(newAqi.city, newAqi.aqi, newAqi.category);
+        alerts.unshift(newAlert); // Add to the beginning
+        if (alerts.length > 20) { // Keep only latest 20 alerts
+          alerts = alerts.slice(0, 20);
+        }
+        io.emit('aqiAlert', newAlert); // Emit individual alert
+      }
     }
   });
-}
-
-// Update AQI data every 5 minutes
-cron.schedule('*/5 * * * *', () => {
-  console.log('Updating AQI data...');
-  initializeAllCitiesData();
-  checkAlertsAndNotify();
-  
-  // Emit updated data to all connected clients
-  io.emit('aqiUpdate', Array.from(aqiData.values()));
+  io.emit('aqiUpdate', updatedAqiDataArray); // Broadcast all updated AQI data
+  io.emit('alertsUpdate', alerts); // Broadcast updated alerts list
 });
 
-// API Routes
-app.get('/api/cities', (req, res) => {
-  res.json(Object.keys(INDIAN_CITIES).map(key => ({
-    key,
-    ...INDIAN_CITIES[key]
-  })));
-});
 
+// API Endpoints
 app.get('/api/aqi/all', (req, res) => {
   res.json(Array.from(aqiData.values()));
 });
 
-app.get('/api/aqi/:city', (req, res) => {
-  const cityKey = req.params.city.toLowerCase();
-  const data = aqiData.get(cityKey);
-  
-  if (!data) {
-    return res.status(404).json({ error: 'City not found' });
+// New endpoint for server-side geocoding
+app.get('/api/geocode', async (req, res) => {
+  const address = req.query.address;
+  if (!address) {
+    return res.status(400).json({ error: 'Address parameter is required.' });
   }
-  
-  res.json(data);
+  try {
+    const response = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+      params: {
+        address: address,
+        key: GOOGLE_MAPS_API_KEY
+      }
+    });
+    if (response.data.status === 'OK' && response.data.results.length > 0) {
+      const result = response.data.results[0];
+      const location = result.geometry.location;
+      const formattedAddress = result.formatted_address;
+      res.json({
+        lat: location.lat,
+        lng: location.lng,
+        name: formattedAddress.split(',')[0].trim(), // Extract primary name
+        full_address: formattedAddress
+      });
+    } else {
+      res.status(404).json({ error: 'Location not found', status: response.data.status });
+    }
+  } catch (error) {
+    console.error('Geocoding API error:', error.message);
+    res.status(500).json({ error: 'Failed to geocode address', details: error.message });
+  }
+});
+
+
+app.get('/api/aqi/:city', async (req, res) => {
+  const cityQuery = req.params.city.toLowerCase();
+  let cityData = aqiData.get(cityQuery);
+
+  if (cityData) {
+    return res.json(cityData);
+  }
+
+  // If not in our in-memory map, try to geocode and generate dynamic data
+  try {
+    const geocodeResponse = await axios.get(`http://localhost:3001/api/geocode?address=${cityQuery}`);
+    const { lat, lng, name } = geocodeResponse.data;
+
+    // Generate simulated data for this new city
+    const newCityData = generateSimulatedAQI(name, lat, lng);
+    // Store it temporarily for future requests during this session
+    aqiData.set(cityQuery, newCityData); 
+    historicalData.set(cityQuery, generateHistoricalData(name)); // Also generate historical
+    
+    res.json(newCityData);
+
+  } catch (error) {
+    console.error(`Error fetching or generating data for ${cityQuery}:`, error.message);
+    // If geocoding fails or data generation has issues
+    res.status(404).json({ error: `City data not found for ${cityQuery}` });
+  }
+});
+
+
+app.get('/api/cities', (req, res) => {
+  // This endpoint now returns all cities currently in aqiData, including dynamically added ones
+  res.json(Array.from(aqiData.values()).map(data => ({
+    key: data.city.toLowerCase(),
+    name: data.city,
+    lat: data.coordinates.lat,
+    lng: data.coordinates.lng
+  })));
 });
 
 app.get('/api/historical/:city', (req, res) => {
@@ -300,17 +312,50 @@ app.get('/api/historical/:city', (req, res) => {
   res.json(data);
 });
 
+// Modified: Integrate Python ML model for forecast
 app.get('/api/forecast/:city', (req, res) => {
   const cityKey = req.params.city.toLowerCase();
-  const currentData = aqiData.get(cityKey);
   
-  if (!currentData) {
-    return res.status(404).json({ error: 'City not found' });
-  }
-  
-  const forecast = generateForecastData(cityKey, currentData.aqi);
-  res.json(forecast);
+  // Path to your Python script
+  const pythonScriptPath = path.join(__dirname, 'aqi.py'); 
+
+  const pythonProcess = spawn('python3', [pythonScriptPath, cityKey]); // Use 'python3' or 'python' based on your environment
+  let forecastData = '';
+  let errorData = '';
+
+  pythonProcess.stdout.on('data', (data) => {
+    forecastData += data.toString();
+  });
+
+  pythonProcess.stderr.on('data', (data) => {
+    errorData += data.toString();
+  });
+
+  pythonProcess.on('close', (code) => {
+    if (code === 0) {
+      try {
+        const forecast = JSON.parse(forecastData);
+        res.json(forecast);
+      } catch (e) {
+        console.error(`Failed to parse Python script output for ${cityKey}:`, e);
+        console.error('Python stdout:', forecastData);
+        console.error('Python stderr:', errorData);
+        res.status(500).json({ error: 'Failed to parse forecast data from ML model', details: errorData });
+      }
+    } else {
+      console.error(`Python script exited with code ${code} for city ${cityKey}.`);
+      console.error('Python stdout:', forecastData); // In case some partial JSON was printed
+      console.error('Python stderr:', errorData);
+      res.status(500).json({ error: `ML forecast failed for ${cityKey}`, details: errorData });
+    }
+  });
+
+  pythonProcess.on('error', (err) => {
+    console.error(`Failed to start Python subprocess: ${err.message}`);
+    res.status(500).json({ error: 'Failed to execute ML forecast script', details: err.message });
+  });
 });
+
 
 app.get('/api/alerts', (req, res) => {
   res.json(alerts.slice(0, 20)); // Return last 20 alerts
@@ -325,6 +370,7 @@ app.get('/api/heatmap-data', (req, res) => {
     city: data.city
   }));
   
+  console.log(`Sending ${heatmapData.length} heatmap data points to frontend.`); // Log data count
   res.json(heatmapData);
 });
 
@@ -332,19 +378,17 @@ app.get('/api/heatmap-data', (req, res) => {
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
   
-  // Send initial data
+  // Send initial data to new client
   socket.emit('aqiUpdate', Array.from(aqiData.values()));
-  socket.emit('alertsUpdate', alerts.slice(0, 20));
-  
+  socket.emit('alertsUpdate', alerts);
+
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
   });
 });
 
-// Initialize data on server start
-initializeAllCitiesData();
-
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log('Initial AQI data loaded and real-time updates scheduled.');
 });

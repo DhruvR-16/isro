@@ -15,7 +15,7 @@ const AlertSystem = () => {
 
     // Listen for real-time alerts
     newSocket.on('aqiAlert', (alert) => {
-      setAlerts(prev => [alert, ...prev.slice(0, 19)]);
+      setAlerts(prev => [alert, ...prev.slice(0, 19)]); // Keep last 20
       showNotification(alert);
       
       if (soundEnabled) {
@@ -23,7 +23,7 @@ const AlertSystem = () => {
       }
     });
 
-    // Listen for alerts updates
+    // Listen for alerts updates (e.g., initial fetch)
     newSocket.on('alertsUpdate', (alertsData) => {
       setAlerts(alertsData);
     });
@@ -34,7 +34,7 @@ const AlertSystem = () => {
     return () => {
       newSocket.close();
     };
-  }, [soundEnabled]);
+  }, [soundEnabled]); // Re-run if soundEnabled changes to update socket listener behavior
 
   const fetchAlerts = async () => {
     try {
@@ -43,6 +43,8 @@ const AlertSystem = () => {
       setAlerts(data);
     } catch (error) {
       console.error('Error fetching alerts:', error);
+      // Fallback if alerts cannot be fetched
+      setAlerts([]);
     }
   };
 
@@ -62,7 +64,7 @@ const AlertSystem = () => {
       );
     }, 5000);
 
-    // Remove notification after animation
+    // Remove notification from DOM after animation
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== notification.id));
     }, 5500);
@@ -70,38 +72,46 @@ const AlertSystem = () => {
     // Browser notification (if permission granted)
     if (Notification.permission === 'granted') {
       new Notification(`AQI Alert - ${alert.city}`, {
-        body: alert.message,
-        icon: '/favicon.ico',
-        tag: alert.city
+        body: `AQI: ${alert.aqi} (${alert.category}) - ${alert.message}`,
+        icon: '/favicon.ico', // Ensure you have a favicon.ico in your public folder
+        tag: alert.city // Group notifications by city
       });
     }
   };
 
   const playAlertSound = (type) => {
-    // Create audio context for alert sounds
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
 
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
 
-    // Different frequencies for different alert types
-    oscillator.frequency.setValueAtTime(
-      type === 'critical' ? 800 : 600, 
-      audioContext.currentTime
-    );
-    
-    gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+      oscillator.frequency.setValueAtTime(
+        type === 'critical' ? 800 : 600, 
+        audioContext.currentTime
+      );
+      
+      gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
 
-    oscillator.start(audioContext.currentTime);
-    oscillator.stop(audioContext.currentTime + 0.5);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.5);
+    } catch (error) {
+      console.error("Error playing sound:", error);
+    }
   };
 
   const requestNotificationPermission = async () => {
-    if (Notification.permission === 'default') {
-      await Notification.requestPermission();
+    if ('Notification' in window) {
+      if (Notification.permission === 'default') {
+        await Notification.requestPermission();
+      } else if (Notification.permission === 'denied') {
+        alert("Browser notification permission denied. Please enable it in your browser settings."); // Consider custom modal
+      }
+    } else {
+      alert("This browser does not support desktop notifications."); // Consider custom modal
     }
   };
 
@@ -130,7 +140,7 @@ const AlertSystem = () => {
   return (
     <>
       {/* Floating Notifications */}
-      <div className="fixed top-4 right-4 z-50 space-y-2">
+      <div className="fixed top-4 right-4 z-50 space-y-2 pointer-events-none"> {/* Added pointer-events-none */}
         {notifications.map((notification) => (
           <div
             key={notification.id}
@@ -138,7 +148,7 @@ const AlertSystem = () => {
               notification.show 
                 ? 'translate-x-0 opacity-100' 
                 : 'translate-x-full opacity-0'
-            }`}
+            } pointer-events-auto`} // Re-enabled pointer events for the notification itself
           >
             <div className={`max-w-sm rounded-lg shadow-lg border-l-4 p-4 ${getAlertBgColor(notification.type)}`}>
               <div className="flex items-start">
@@ -158,7 +168,7 @@ const AlertSystem = () => {
                 </div>
                 <button
                   onClick={() => dismissNotification(notification.id)}
-                  className="ml-2 flex-shrink-0"
+                  className="ml-2 flex-shrink-0 p-1 rounded-full hover:bg-gray-100 transition-colors"
                 >
                   <X className="h-4 w-4 text-gray-400 hover:text-gray-600" />
                 </button>
@@ -169,7 +179,7 @@ const AlertSystem = () => {
       </div>
 
       {/* Alert System Panel */}
-      <div className="bg-white rounded-lg shadow-sm">
+      <div className="card-enhanced">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200">
           <div className="flex items-center">
@@ -184,10 +194,10 @@ const AlertSystem = () => {
           <div className="flex items-center space-x-2">
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
-              className={`p-2 rounded-md ${
+              className={`p-2 rounded-md transition-colors ${
                 soundEnabled 
-                  ? 'text-blue-600 bg-blue-50' 
-                  : 'text-gray-400 bg-gray-50'
+                  ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' 
+                  : 'text-gray-400 bg-gray-50 hover:bg-gray-100'
               }`}
               title={soundEnabled ? 'Disable sound alerts' : 'Enable sound alerts'}
             >
@@ -195,7 +205,7 @@ const AlertSystem = () => {
             </button>
             <button
               onClick={requestNotificationPermission}
-              className="text-sm text-blue-600 hover:text-blue-800"
+              className="btn-secondary text-sm"
             >
               Enable Browser Notifications
             </button>
@@ -205,17 +215,17 @@ const AlertSystem = () => {
         {/* Alerts List */}
         <div className="max-h-96 overflow-y-auto">
           {alerts.length === 0 ? (
-            <div className="p-8 text-center">
+            <div className="p-8 text-center text-gray-500">
               <Bell className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500">No recent alerts</p>
-              <p className="text-sm text-gray-400 mt-1">
+              <p>No recent alerts</p>
+              <p className="text-sm mt-1">
                 You'll be notified when AQI levels exceed healthy thresholds
               </p>
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
               {alerts.map((alert) => (
-                <div key={alert.id} className="p-4 hover:bg-gray-50">
+                <div key={alert.id} className="p-4 hover:bg-gray-50 transition-colors">
                   <div className="flex items-start">
                     <div className="flex-shrink-0 mt-1">
                       {getAlertIcon(alert.type)}
@@ -248,7 +258,7 @@ const AlertSystem = () => {
         </div>
 
         {/* Alert Settings */}
-        <div className="p-4 border-t border-gray-200 bg-gray-50">
+        <div className="p-4 border-t border-gray-200 bg-gray-50 rounded-b-lg">
           <h4 className="text-sm font-medium text-gray-900 mb-2">Alert Thresholds</h4>
           <div className="grid grid-cols-2 gap-4 text-xs">
             <div className="flex items-center">
@@ -267,3 +277,8 @@ const AlertSystem = () => {
 };
 
 export default AlertSystem;
+
+
+
+
+;

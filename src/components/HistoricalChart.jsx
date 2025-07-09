@@ -19,10 +19,29 @@ const HistoricalChart = ({ selectedCity }) => {
     setLoading(true);
     try {
       const response = await fetch(`http://localhost:3001/api/historical/${selectedCity.toLowerCase()}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const data = await response.json();
       setHistoricalData(data);
     } catch (error) {
       console.error('Error fetching historical data:', error);
+      // Fallback to mock data if server is unreachable or errors
+      const now = new Date();
+      const mockData = Array.from({ length: 30 }).map((_, i) => {
+        const date = new Date(now.getTime() - (29 - i) * 24 * 60 * 60 * 1000);
+        const aqi = 80 + Math.floor(Math.random() * 70 * Math.sin(i * 0.5) + Math.random() * 30);
+        return {
+          date: date.toISOString().split('T')[0],
+          aqi: Math.min(350, Math.max(20, aqi)), // Cap for mock
+          pm25: Math.floor(aqi * 0.6),
+          pm10: Math.floor(aqi * 0.8),
+          no2: Math.floor(aqi * 0.3),
+          temperature: 20 + Math.floor(Math.random() * 15),
+          humidity: 50 + Math.floor(Math.random() * 30)
+        };
+      });
+      setHistoricalData(mockData);
     } finally {
       setLoading(false);
     }
@@ -30,14 +49,14 @@ const HistoricalChart = ({ selectedCity }) => {
 
   const getMetricColor = (metric) => {
     const colors = {
-      aqi: '#3B82F6',
-      pm25: '#EF4444',
-      pm10: '#F59E0B',
-      no2: '#10B981',
-      temperature: '#8B5CF6',
-      humidity: '#06B6D4'
+      aqi: '#3B82F6', // Blue
+      pm25: '#EF4444', // Red
+      pm10: '#F59E0B', // Orange
+      no2: '#10B981', // Green
+      temperature: '#8B5CF6', // Purple
+      humidity: '#06B6D4' // Cyan
     };
-    return colors[metric] || '#6B7280';
+    return colors[metric] || '#6B7280'; // Default gray
   };
 
   const getMetricLabel = (metric) => {
@@ -66,15 +85,15 @@ const HistoricalChart = ({ selectedCity }) => {
   };
 
   const getTrendDirection = (data, metric) => {
-    if (data.length < 2) return 'stable';
+    if (data.length < 7) return 'stable'; // Need at least a week of data for trend
     const recent = data.slice(-7); // Last 7 days
     const older = data.slice(-14, -7); // Previous 7 days
     
     const recentAvg = getAverageValue(recent, metric);
     const olderAvg = getAverageValue(older, metric);
     
-    if (recentAvg > olderAvg * 1.1) return 'increasing';
-    if (recentAvg < olderAvg * 0.9) return 'decreasing';
+    if (recentAvg > olderAvg * 1.1) return 'increasing'; // 10% increase
+    if (recentAvg < olderAvg * 0.9) return 'decreasing'; // 10% decrease
     return 'stable';
   };
 
@@ -94,7 +113,7 @@ const HistoricalChart = ({ selectedCity }) => {
               tickFormatter={formatDate}
               interval="preserveStartEnd"
             />
-            <YAxis />
+            <YAxis label={{ value: getMetricLabel(selectedMetric), angle: -90, position: 'insideLeft' }} />
             <Tooltip 
               labelFormatter={(date) => new Date(date).toLocaleDateString()}
               formatter={(value, name) => [value, getMetricLabel(name)]}
@@ -118,7 +137,7 @@ const HistoricalChart = ({ selectedCity }) => {
               tickFormatter={formatDate}
               interval="preserveStartEnd"
             />
-            <YAxis />
+            <YAxis label={{ value: getMetricLabel(selectedMetric), angle: -90, position: 'insideLeft' }} />
             <Tooltip 
               labelFormatter={(date) => new Date(date).toLocaleDateString()}
               formatter={(value, name) => [value, getMetricLabel(name)]}
@@ -130,7 +149,7 @@ const HistoricalChart = ({ selectedCity }) => {
           </BarChart>
         );
       
-      default:
+      default: // line chart
         return (
           <LineChart {...chartProps}>
             <CartesianGrid strokeDasharray="3 3" />
@@ -139,7 +158,7 @@ const HistoricalChart = ({ selectedCity }) => {
               tickFormatter={formatDate}
               interval="preserveStartEnd"
             />
-            <YAxis />
+            <YAxis label={{ value: getMetricLabel(selectedMetric), angle: -90, position: 'insideLeft' }} />
             <Tooltip 
               labelFormatter={(date) => new Date(date).toLocaleDateString()}
               formatter={(value, name) => [value, getMetricLabel(name)]}
@@ -150,6 +169,7 @@ const HistoricalChart = ({ selectedCity }) => {
               stroke={getMetricColor(selectedMetric)} 
               strokeWidth={2}
               dot={{ fill: getMetricColor(selectedMetric), strokeWidth: 2, r: 4 }}
+              activeDot={{ r: 6 }}
             />
           </LineChart>
         );
@@ -158,7 +178,7 @@ const HistoricalChart = ({ selectedCity }) => {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow-sm p-6">
+      <div className="card-enhanced p-6">
         <div className="animate-pulse">
           <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
           <div className="h-64 bg-gray-200 rounded"></div>
@@ -171,7 +191,7 @@ const HistoricalChart = ({ selectedCity }) => {
   const trendDirection = getTrendDirection(historicalData, selectedMetric);
 
   return (
-    <div className="bg-white rounded-lg shadow-sm">
+    <div className="card-enhanced">
       {/* Header */}
       <div className="p-6 border-b border-gray-200">
         <div className="flex items-center justify-between mb-4">
@@ -188,14 +208,14 @@ const HistoricalChart = ({ selectedCity }) => {
         </div>
 
         {/* Controls */}
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4 mb-4">
           {/* Metric Selector */}
           <div className="flex items-center space-x-2">
             <Filter className="h-4 w-4 text-gray-500" />
             <select
               value={selectedMetric}
               onChange={(e) => setSelectedMetric(e.target.value)}
-              className="text-sm border border-gray-300 rounded-md px-3 py-1 focus:ring-blue-500 focus:border-blue-500"
+              className="form-select"
             >
               <option value="aqi">AQI</option>
               <option value="pm25">PM2.5</option>
@@ -212,7 +232,7 @@ const HistoricalChart = ({ selectedCity }) => {
               <button
                 key={type}
                 onClick={() => setChartType(type)}
-                className={`px-3 py-1 text-sm font-medium rounded ${
+                className={`px-3 py-1 text-sm font-medium rounded transition-colors ${
                   chartType === type
                     ? 'bg-white text-blue-600 shadow-sm'
                     : 'text-gray-600 hover:text-gray-900'
@@ -227,11 +247,13 @@ const HistoricalChart = ({ selectedCity }) => {
           <select
             value={dateRange}
             onChange={(e) => setDateRange(e.target.value)}
-            className="text-sm border border-gray-300 rounded-md px-3 py-1 focus:ring-blue-500 focus:border-blue-500"
+            className="form-select"
           >
             <option value="7">Last 7 days</option>
             <option value="30">Last 30 days</option>
             <option value="90">Last 90 days</option>
+            <option value="180">Last 180 days</option>
+            <option value="365">Last 365 days</option>
           </select>
         </div>
       </div>
@@ -272,10 +294,14 @@ const HistoricalChart = ({ selectedCity }) => {
       </div>
 
       {/* Data Quality Info */}
-      <div className="p-4 bg-gray-50 border-t border-gray-200">
+      <div className="p-4 bg-gray-50 border-t border-gray-200 rounded-b-lg">
         <p className="text-xs text-gray-600">
           <span className="font-medium">Data Source:</span> Simulated data based on real-world patterns. 
           In production, this would connect to CPCB/ISRO satellite data and ground monitoring stations.
+        </p>
+        {/* Placeholder for Satellite Images over time */}
+        <p className="text-xs text-gray-500 mt-2">
+          <span className="font-medium">Visual Correlation:</span> Satellite images over time for visual correlation would be displayed here (Future Enhancement).
         </p>
       </div>
     </div>

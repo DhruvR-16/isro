@@ -7,7 +7,7 @@ const HealthAdvisory = ({ selectedCity, currentAQI }) => {
   const [emergencyContacts, setEmergencyContacts] = useState([]);
 
   useEffect(() => {
-    if (currentAQI) {
+    if (currentAQI !== null) { // Ensure currentAQI is not null
       generateHealthRecommendations(currentAQI);
       setSensitiveGroupsInfo(currentAQI);
       setEmergencyContactsInfo();
@@ -242,9 +242,9 @@ const HealthAdvisory = ({ selectedCity, currentAQI }) => {
     }
   };
 
-  if (!currentAQI) {
+  if (currentAQI === null) {
     return (
-      <div className="bg-white rounded-lg shadow-sm p-6">
+      <div className="card-enhanced p-6">
         <div className="text-center text-gray-500">
           <Heart className="h-12 w-12 mx-auto mb-4 text-gray-300" />
           <p>Select a city to view health recommendations</p>
@@ -258,7 +258,7 @@ const HealthAdvisory = ({ selectedCity, currentAQI }) => {
   return (
     <div className="space-y-6">
       {/* Current AQI Status */}
-      <div className="bg-white rounded-lg shadow-sm p-6">
+      <div className="card-enhanced p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900">Health Advisory - {selectedCity}</h3>
           <div className={`${aqiCategory.color} text-white px-4 py-2 rounded-full`}>
@@ -273,7 +273,7 @@ const HealthAdvisory = ({ selectedCity, currentAQI }) => {
       </div>
 
       {/* Health Recommendations */}
-      <div className="bg-white rounded-lg shadow-sm p-6">
+      <div className="card-enhanced p-6">
         <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
           <Shield className="h-5 w-5 mr-2" />
           Recommended Actions
@@ -301,7 +301,7 @@ const HealthAdvisory = ({ selectedCity, currentAQI }) => {
       </div>
 
       {/* Sensitive Groups */}
-      <div className="bg-white rounded-lg shadow-sm p-6">
+      <div className="card-enhanced p-6">
         <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
           <Users className="h-5 w-5 mr-2" />
           Sensitive Groups Advisory
@@ -329,19 +329,19 @@ const HealthAdvisory = ({ selectedCity, currentAQI }) => {
       </div>
 
       {/* Emergency Contacts */}
-      <div className="bg-white rounded-lg shadow-sm p-6">
+      <div className="card-enhanced p-6">
         <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
           <Phone className="h-5 w-5 mr-2" />
           Emergency Contacts
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {emergencyContacts.map((contact, index) => (
-            <div key={index} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50">
+            <div key={index} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
               <div className="flex items-center justify-between mb-2">
                 <h5 className="font-semibold text-gray-900">{contact.title}</h5>
                 <a 
                   href={`tel:${contact.number}`}
-                  className="bg-red-600 text-white px-3 py-1 rounded-md text-sm font-medium hover:bg-red-700"
+                  className="bg-red-600 text-white px-3 py-1 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
                 >
                   {contact.number}
                 </a>
@@ -359,33 +359,15 @@ const HealthAdvisory = ({ selectedCity, currentAQI }) => {
           General Health Protection Tips
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-800">
-          <ul className="space-y-2">
-            <li className="flex items-start">
-              <span className="w-2 h-2 bg-blue-600 rounded-full mt-2 mr-2 flex-shrink-0"></span>
-              Keep windows closed during high pollution periods
-            </li>
-            <li className="flex items-start">
-              <span className="w-2 h-2 bg-blue-600 rounded-full mt-2 mr-2 flex-shrink-0"></span>
-              Use air purifiers with HEPA filters indoors
-            </li>
-            <li className="flex items-start">
-              <span className="w-2 h-2 bg-blue-600 rounded-full mt-2 mr-2 flex-shrink-0"></span>
-              Avoid outdoor exercise during peak pollution hours
-            </li>
+          <ul className="space-y-2 list-disc list-inside">
+            <li>Keep windows closed during high pollution periods</li>
+            <li>Use air purifiers with HEPA filters indoors</li>
+            <li>Avoid outdoor exercise during peak pollution hours</li>
           </ul>
-          <ul className="space-y-2">
-            <li className="flex items-start">
-              <span className="w-2 h-2 bg-blue-600 rounded-full mt-2 mr-2 flex-shrink-0"></span>
-              Stay hydrated and maintain a healthy diet
-            </li>
-            <li className="flex items-start">
-              <span className="w-2 h-2 bg-blue-600 rounded-full mt-2 mr-2 flex-shrink-0"></span>
-              Consider indoor plants that help purify air
-            </li>
-            <li className="flex items-start">
-              <span className="w-2 h-2 bg-blue-600 rounded-full mt-2 mr-2 flex-shrink-0"></span>
-              Monitor AQI regularly and plan activities accordingly
-            </li>
+          <ul className="space-y-2 list-disc list-inside">
+            <li>Stay hydrated and maintain a healthy diet</li>
+            <li>Consider indoor plants that help purify air</li>
+            <li>Monitor AQI regularly and plan activities accordingly</li>
           </ul>
         </div>
       </div>
